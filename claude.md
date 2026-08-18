@@ -1,0 +1,3 @@
+- Always make sure there is nothing to pull before editing or committing a file. Two people are working on this repo and we want to try to keep things clean and updated, despite we will just push on main.
+- This is a learning project, keep it simple. The goal is to recap data cleaning, feature engineering, models and metrics. Performance is secondary to code clarity.
+- Do not generate notebooks via a Python script (e.g. a `build_nb.py` that writes `.ipynb` JSON). Edit notebooks directly in Jupyter/the IDE. This is a collab repo with two people editing notebooks by hand, and a generator script silently overwrites their in-notebook edits when rerun.
