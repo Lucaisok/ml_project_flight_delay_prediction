@@ -47,8 +47,19 @@ Expected schema (per the strategy report -- verify against `train.info()` below,
 cells.append(code("""import pandas as pd
 import numpy as np
 
-train = pd.read_csv("data/train.csv", parse_dates=["DATOP", "STD", "STA"])
-test = pd.read_csv("data/test.csv", parse_dates=["DATOP", "STD", "STA"])
+train = pd.read_csv("data/train.csv")
+test = pd.read_csv("data/test.csv")
+
+# Parse the date columns explicitly with errors="coerce" rather than via read_csv's
+# parse_dates. A handful of malformed/mixed-format values in STD/STA otherwise leave
+# the whole column as object dtype (a mix of Timestamps and raw strings), which later
+# raises "TypeError: cannot subtract DatetimeArray from ndarray[object]" when we compute
+# the scheduled block time. Coercing unparseable values to NaT keeps every column a
+# proper datetime64 dtype throughout.
+for df in (train, test):
+    for col in ["DATOP", "STD", "STA"]:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+
 train.head()"""))
 
 cells.append(md("""### First Look at the Data
@@ -130,6 +141,7 @@ def add_features(df):
     df["dow"] = df["STD"].dt.dayofweek
     df["month"] = df["STD"].dt.month
     df["block_min"] = (df["STA"] - df["STD"]).dt.total_seconds() / 60
+    df["block_min"] = df["block_min"].fillna(df["block_min"].median())
     df["route"] = df["DEPSTN"].astype(str) + "_" + df["ARRSTN"].astype(str)
     return df
 
