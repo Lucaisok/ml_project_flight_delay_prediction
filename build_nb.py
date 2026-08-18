@@ -27,7 +27,7 @@ Working notebook for the [Zindi Flight Delay Prediction Challenge](https://zindi
 cells.append(md("""## Get the Data
 
 > [!IMPORTANT]
-> This repo does not ship the competition data. Download `train.csv`, `test.csv`, and `SampleSubmission.csv` from the **Data** tab of the [challenge page](https://zindi.africa/competitions/flight-delay-prediction-challenge) (Zindi account required) and place them in `data/`.
+> This repo does not ship the competition data in full. `data/Train.csv` is checked in; download `Test.csv` and `SampleSubmission.csv` from the **Data** tab of the [challenge page](https://zindi.africa/competitions/flight-delay-prediction-challenge) (Zindi account required) and place them in `data/` too once you're ready to produce a leaderboard submission. This notebook's baselines only need `Train.csv` -- they validate on a held-out, time-based slice of the training data itself.
 
 Expected schema (per the strategy report -- verify against `train.info()` below, column names may differ slightly):
 
@@ -47,16 +47,32 @@ Expected schema (per the strategy report -- verify against `train.info()` below,
 cells.append(code("""import pandas as pd
 import numpy as np
 
-train = pd.read_csv("data/train.csv")
-test = pd.read_csv("data/test.csv")
+train = pd.read_csv("data/Train.csv")
+
+# Test.csv isn't checked into the repo yet (only needed for a leaderboard submission,
+# not for building/validating the baselines below) -- load it if present, otherwise
+# carry on with train-only.
+try:
+    test = pd.read_csv("data/Test.csv")
+except FileNotFoundError:
+    test = None
+    print("data/Test.csv not found -- continuing with train-only baselines.")
 
 # Parse the date columns explicitly with errors="coerce" rather than via read_csv's
-# parse_dates. A handful of malformed/mixed-format values in STD/STA otherwise leave
-# the whole column as object dtype (a mix of Timestamps and raw strings), which later
-# raises "TypeError: cannot subtract DatetimeArray from ndarray[object]" when we compute
-# the scheduled block time. Coercing unparseable values to NaT keeps every column a
-# proper datetime64 dtype throughout.
+# parse_dates. A handful of malformed/mixed-format values otherwise leave the whole
+# column as object dtype (a mix of Timestamps and raw strings), which later raises
+# "TypeError: cannot subtract DatetimeArray from ndarray[object]" when we compute the
+# scheduled block time. Coercing unparseable values to NaT keeps every column a proper
+# datetime64 dtype throughout.
+#
+# STA is also a known data quirk in this dataset: it uses dots as the time separator
+# ("2016-01-03 12.55.00") instead of colons like STD and DATOP ("2016-01-03 10:30:00"),
+# which pandas can't parse at all -- left as-is, every single STA value comes out NaT.
+# Normalise dots to colons first so it parses like the other two.
 for df in (train, test):
+    if df is None:
+        continue
+    df["STA"] = df["STA"].str.replace(".", ":", regex=False)
     for col in ["DATOP", "STD", "STA"]:
         df[col] = pd.to_datetime(df[col], errors="coerce")
 
