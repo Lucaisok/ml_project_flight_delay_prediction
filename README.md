@@ -64,3 +64,6 @@ Delay costs scale non-linearly — a short delay is absorbed by schedule buffer,
 ## Presentation
 
 See `presentation/flight_delay_presentation.pdf` for the full findings, recommendation, and proposed data product (a delay-risk dashboard for operations), built for a 10-minute non-technical stakeholder audience.
+
+## Run notebooks
+Notebooks are numbered in run order: 01_data_cleaning.ipynb must be run first, since it writes data/processed/cleaned_data.csv, which 02_feature_engineering_modeling.ipynb then reads as its starting point.
