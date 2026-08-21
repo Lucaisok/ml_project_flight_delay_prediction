@@ -1,152 +1,66 @@
-# Machine Learning Project Template
+# Flight Delay Prediction
 
-A starting point for your team machine learning project. The repository ships an example notebook that trains a simple model with minimal cleaning and feature selection. Use it as scaffolding, then build your own project on top of it.
+A machine learning project to predict flight delay duration (in minutes) using Tunisair operational scheduling data.
 
-The example uses the [coffee quality dataset](https://github.com/jldbc/coffee-quality-database).
+## Problem
 
-## Learning Objectives
+Flight delays are costly for airlines beyond passenger frustration: they reduce operational efficiency, increase capital costs from aircraft repositioning, and force expensive crew reallocation when duty-time limits are hit. Severe, memorable delays also erode passenger trust and future demand.
 
-By the end of this repository, you should be able to:
+**Goal:** predict the delay duration (in minutes) for each flight, framed as a regression problem, to enable proactive operational planning instead of reactive firefighting.
 
-- Work on a data science project as a team, sharing the work across the data science lifecycle.
-- Frame a business problem as a machine learning task and choose a performance metric that fits the value you want to create.
-- Build a baseline model, then iterate with error analysis and at least three algorithms (including cross validation and hyperparameter tuning).
-- Communicate your findings and recommendations to a non-technical audience in a short presentation.
+## Data
 
-## Learning Path
+- **107,833** flight records, of which **64.6%** experienced some delay.
+- Target (`target`, delay in minutes): mean **48.7**, median **14**, std **117.1**, range **0–3,451**.
+- The distribution is strongly right-skewed: 25% of flights have zero delay, but a small number of extreme outliers pull the mean well above the median.
+- **Key finding:** severely delayed flights (180+ minutes) make up just **6.5%** of the data but account for **86.6%** of total squared deviation — directly motivating the choice of evaluation metric below.
 
-Your project follows the data science lifecycle:
+Raw columns: `ID`, `DATOP`, `FLTID`, `DEPSTN`, `ARRSTN`, `STD`, `STA`, `STATUS`, `AC`, `target`.
 
-```mermaid
-flowchart LR
-    A[Data] --> B[EDA]
-    B --> C[Baseline model]
-    C --> D[Error analysis and iteration]
-    D --> E[Stakeholder presentation]
-```
+## Metric
 
-Start with the assignment, set up your board, then use the example notebook as a reference:
+**RMSE (primary)**, **MAE (secondary)**.
 
-| File / Folder | Description |
-|---|---|
-| [**Assignment**](01_assignment.md) | The project brief: timeline, milestones, project options, deliverables, and things to think about. |
-| [**Kanban Board**](02_kanban_board.md) | Step-by-step setup of a GitHub project board to plan and track your work. |
-| [**EDA and Modeling**](03_eda-and-modeling.ipynb) | Worked example of selecting features, doing minimal cleaning, and training a simple model. |
+Delay costs scale non-linearly — a short delay is absorbed by schedule buffer, while a long delay triggers crew reallocation, aircraft repositioning, and lost passenger trust. RMSE penalizes large errors more heavily, aligning the evaluation with where the real business cost concentrates. MAE is reported alongside to track everyday operational accuracy.
 
-### Additional Folders and Files
+## Methodology
 
-| File / Folder | Description |
-|---|---|
-| [**Data**](data/) | Where your datasets go. |
-| [**Models**](models/) | Where trained models are saved. |
-| [**Assets**](assets/) | Screenshots used in the Kanban board guide. |
-| [**pyproject.toml**](pyproject.toml) | Project configuration and dependencies. |
-| [**uv.lock**](uv.lock) | Dependency lock file. |
+1. **Data cleaning** — parsed inconsistent datetime formats (`STA`/`STD` mixed `HH:MM:SS` / `HH.MM.SS`), split composite identifiers (`FLTID` → airline + flight number, `AC` → airline + aircraft type + tail number), and **removed the `STATUS` column** after confirming it was a target-leakage risk (rows with `SCH`/`DEL` status had `target = 0` by construction).
 
-## Setup
+2. **Feature engineering** (15 features), including:
+   - `route`, `flight_duration`, `crosses_year`, `is_weekend`, `is_night`, `is_holiday`, `flight_season`
+   - Same-day delay propagation per aircraft / airline / route / departure station
+   - Delay of each aircraft's immediately preceding flight (regardless of day)
+   - Historical average delay per route / airline / departure & arrival station
+   - A 3-flight rolling average of prior delay per aircraft
 
-> [!NOTE]
-> Throughout these steps, text in angle brackets like `<repo-name>` is a **placeholder**. Replace it, including the `< >` brackets, with your own value. For example, `cd <repo-name>` becomes `cd my-ml-project`.
+   Target-derived features (propagation, historical averages) are computed as strictly backward-looking, time-ordered aggregates — no row ever uses its own or a future row's target value.
 
-### 1. Create the Repository from the Template
+3. **Time-based train/test split** — trained on earlier flights, tested on the most recent ~20% of dates. A random split was ruled out because several features are time-dependent; a random split could let future flights leak into a "past" flight's history.
 
-Click **Use this template** on GitHub.
+4. **Baselines** — constant (mean/median), route-mean, and Ridge regression, to establish the floor any real model needs to beat.
 
-When creating the repository:
+5. **Advanced models** — Random Forest and XGBoost, each hyperparameter-tuned via `RandomizedSearchCV` with `TimeSeriesSplit` cross-validation.
 
-- Set yourself as the **Owner**
-- Choose a repository name
-- Disable **Include all branches**
-- Click **Create repository**
+## Results
 
-> [!IMPORTANT]
-> If you are working in pairs or groups, only **one person** should complete this step.
+| Model | RMSE | MAE |
+|---|---|---|
+| Constant (median) | 150.14 | 60.48 |
+| Route mean | 139.60 | 61.87 |
+| Ridge regression | 139.47 | 60.67 |
+| Random Forest (tuned) | 121.57 | 56.31 |
+| XGBoost (tuned) | 122.02 | 54.13 |
+| **XGBoost + Tweedie objective + rolling delay feature** | **120.98** | **49.40** |
 
----
+**Feature importance:** same-day and prior-flight delay propagation for a specific aircraft are by far the strongest predictors — stronger than calendar effects (season, holidays, weekday). Delays are driven far more by "what's happening right now" than by "what usually happens on this route or time of year."
 
-### 2. Add Collaborators (Pairs/Groups Only)
+**Error analysis:** the model is accurate on typical flights (RMSE ~55–70 min across Early/Minor/Moderate/Major severity buckets) but error rises sharply on the rare Severe (180+ min) segment (RMSE ~350, MAE ~222) — the intended focus of the RMSE-first metric choice, and the clearest target for further improvement.
 
-If working with teammates:
+## Limitations & Future Work
 
-1. Open the repository on GitHub
-2. Go to **Settings → Collaborators**
-3. Add your teammates as collaborators
-4. Share the repository link with your team
+- The model still under-predicts the most extreme delays (1,000+ minutes) — the rarest, hardest cases to learn from.
 
-Teammates should accept the invitation before continuing.
+## Presentation
 
----
-
-### 3. Clone the Repository
-
-Copy the SSH URL from the **Code** button on GitHub, then run:
-
-```bash
-git clone <copied-ssh-url>
-```
-
-The copied SSH URL will look like `git@github.com:<your-username>/<repo-name>.git`.
-
----
-
-### 4. Move into the Project Folder and Install Dependencies
-
-This installs all dependencies and creates a virtual environment in (`.venv/`).
-
-```bash
-cd <repo-name>
-uv sync
-```
-
-> [!TIP]
-> This is your own project, so you will add libraries as you go. Install a new package with `uv add <package>` (for example `uv add xgboost`). It updates `pyproject.toml` and `uv.lock` for the whole team.
-
----
-
-### 5. Open the Notebook
-
-> [!NOTE]
-> Make sure you open VS Code from the project root so it automatically detects the environment created by `uv sync`.
-
-Launch VS Code in the project root folder:
-
-```bash
-code .
-```
-
-Then open `03_eda-and-modeling.ipynb` and select the Python environment created by `uv sync` as the kernel.
-
-## Handling Merge Conflicts in Notebooks
-
-When working in a team, `.ipynb` files can cause messy merge conflicts because they are JSON based. The `nbdime` tool makes this easier, and `uvx` runs it without adding it to your project dependencies.
-
-Enable the git integration once:
-
-```bash
-uvx nbdime config-git --enable
-```
-
-When a conflict happens, open the merge tool:
-
-```bash
-uvx nbdime mergetool
-```
-
-A web interface opens showing both notebook versions side by side. Choose what to keep, save, and close the tool, then:
-
-```bash
-git add your_notebook.ipynb
-git commit -m "Resolve notebook conflict"
-```
-
-> [!TIP]
-> When working with notebooks, it's a good idea to clear outputs before committing to reduce the chances of conflicts. You can do this in VS Code with the command palette: `Notebook: Clear All Outputs`.
-
-## References & Further Reading
-
-- [**scikit-learn Documentation**](https://scikit-learn.org/stable/): the library used for modelling, with user guides and examples.
-- [**Choosing the Right Estimator**](https://scikit-learn.org/stable/machine_learning_map.html): a visual map for picking a model based on your problem and data.
-- [**PEP 8 Style Guide for Python Code**](https://peps.python.org/pep-0008/): the style your notebook should follow.
-- [**Jupyter Notebooks in VS Code**](https://code.visualstudio.com/docs/datascience/jupyter-notebooks): how to run notebooks and pick a kernel in VS Code.
-- [**uv Documentation**](https://docs.astral.sh/uv/): the package manager that handles Python and dependencies for this repo.
-- [**Zindi Competitions**](https://zindi.africa/competitions): real-world challenges, several of which are listed as project options in the assignment.
+See `presentation/flight_delay_presentation.pdf` for the full findings, recommendation, and proposed data product (a delay-risk dashboard for operations), built for a 10-minute non-technical stakeholder audience.
