@@ -179,21 +179,103 @@ rmse_baseline2 = rmse(X_val["target"], baseline2_pred)
 
 print(f"Baseline 2 (Ridge regression) validation RMSE: {rmse_baseline2:.2f}")"""))
 
-cells.append(md("""### Compare the Baselines"""))
+cells.append(md("""## Tree Ensembles: Random Forest and XGBoost
 
-cells.append(code("""pd.DataFrame({
-    "baseline": ["Constant mean", "Route mean", "Ridge regression"],
-    "validation_rmse": [rmse_baseline0, rmse_baseline1, rmse_baseline2],
-}).sort_values("validation_rmse")"""))
+The baselines above set the RMSE floor. We now try two tree-ensemble models on the **same engineered features** (`X_train_feat` / `X_val_feat` from Baseline 2) to see whether they earn their added complexity over a linear model.
 
-cells.append(md("""Whichever baseline scores lowest here is the number every subsequent model (Random Forest, then gradient-boosted trees -- LightGBM / CatBoost, per the strategy report's recommendation) has to beat. Record this score before moving on to feature engineering and more advanced models.
+Both are trained with one-hot encoded categoricals for a fair, apples-to-apples comparison with Ridge -- native categorical handling (CatBoost/LightGBM) is future work per the strategy report."""))
+
+cells.append(md("""### Random Forest
+
+An ensemble of de-correlated decision trees, each trained on a bootstrap sample with a random subset of features at each split, averaged together. Unlike Ridge, it can capture non-linear effects and interactions (e.g. "delays are worse on weekend evenings at this specific route") without us having to engineer them by hand."""))
+
+cells.append(code("""from sklearn.ensemble import RandomForestRegressor
+
+rf_model = Pipeline([
+    ("preprocess", preprocess),
+    ("reg", RandomForestRegressor(
+        n_estimators=300,
+        max_depth=10,
+        min_samples_leaf=5,
+        n_jobs=-1,
+        random_state=42,
+    )),
+])
+rf_model.fit(X_train_feat[cat_cols + num_cols], X_train_feat["target"])
+
+rf_pred = rf_model.predict(X_val_feat[cat_cols + num_cols])
+rmse_rf = rmse(X_val["target"], rf_pred)
+
+print(f"Random Forest validation RMSE: {rmse_rf:.2f}")"""))
+
+cells.append(md("""#### Random Forest Feature Importance
+
+Which features the forest actually splits on -- a sanity check that it is learning something plausible, and a pointer to which engineered features are worth refining next."""))
+
+cells.append(code("""rf_feature_names = rf_model.named_steps["preprocess"].get_feature_names_out()
+rf_importances = pd.Series(
+    rf_model.named_steps["reg"].feature_importances_, index=rf_feature_names
+).sort_values(ascending=False)
+
+rf_importances.head(15)"""))
+
+cells.append(md("""### XGBoost
+
+A gradient-boosted tree ensemble: trees are added sequentially, each one fit to correct the residual errors of the ensemble so far, rather than averaged independently like Random Forest. It is the closest of the two to the CatBoost/LightGBM models recommended as the next iteration in the strategy report, and often the strongest tabular model for this kind of skewed, tail-heavy target."""))
+
+cells.append(code("""from xgboost import XGBRegressor
+
+xgb_model = Pipeline([
+    ("preprocess", preprocess),
+    ("reg", XGBRegressor(
+        n_estimators=500,
+        max_depth=6,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        n_jobs=-1,
+    )),
+])
+xgb_model.fit(X_train_feat[cat_cols + num_cols], X_train_feat["target"])
+
+xgb_pred = xgb_model.predict(X_val_feat[cat_cols + num_cols])
+rmse_xgb = rmse(X_val["target"], xgb_pred)
+
+print(f"XGBoost validation RMSE: {rmse_xgb:.2f}")"""))
+
+cells.append(md("""#### XGBoost Feature Importance"""))
+
+cells.append(code("""xgb_feature_names = xgb_model.named_steps["preprocess"].get_feature_names_out()
+xgb_importances = pd.Series(
+    xgb_model.named_steps["reg"].feature_importances_, index=xgb_feature_names
+).sort_values(ascending=False)
+
+xgb_importances.head(15)"""))
+
+cells.append(md("""### Compare All Models"""))
+
+cells.append(code("""results = pd.DataFrame({
+    "model": ["Constant mean", "Route mean", "Ridge regression", "Random Forest", "XGBoost"],
+    "validation_rmse": [rmse_baseline0, rmse_baseline1, rmse_baseline2, rmse_rf, rmse_xgb],
+}).sort_values("validation_rmse").reset_index(drop=True)
+
+results"""))
+
+cells.append(code("""ax = results.set_index("model")["validation_rmse"].plot(
+    kind="barh", figsize=(7, 4), title="Validation RMSE by model (lower is better)"
+)
+ax.set_xlabel("RMSE (minutes)")
+ax.invert_yaxis()"""))
+
+cells.append(md("""Whichever model scores lowest here is the number the next iteration (richer features, native-categorical CatBoost/LightGBM, tuning) has to beat. Random Forest and XGBoost are trained here with reasonable defaults, not yet tuned -- the gap between them and Ridge is the more informative signal at this stage than either's absolute score.
 
 ## Next Steps
 
 Per the strategy report's roadmap (Sections 3, 6-7):
 
 1. Expand feature engineering: cyclical hour/month encoding, part-of-day buckets, an airport-traffic proxy, and -- carefully, using only past rows -- expanding-mean delay per aircraft/route/flight number and same-day delay-propagation.
-2. Move to gradient-boosted trees (CatBoost first, for native handling of `FLTID`/`DEPSTN`/`ARRSTN`/`AC`; LightGBM alongside it for fast iteration), tuned with forward-chaining time-based CV and early stopping.
+2. Move to gradient-boosted trees with native categorical handling (CatBoost first, for `FLTID`/`DEPSTN`/`ARRSTN`/`AC`; LightGBM alongside it for fast iteration), tuned with forward-chaining time-based CV, early stopping, and a hyperparameter search (the Random Forest and XGBoost above use untuned defaults).
 3. Try `log1p(target)` or a Huber loss to reduce the influence of extreme delays, comparing against raw-minute training on the same validation split.
 4. Blend/stack the strongest 2-3 models for the final submission.
 5. Do error analysis by route, month, and delay magnitude before the final retrain-on-everything and `submission.csv` write-out (columns `id`, `target`, matching `SampleSubmission.csv` exactly)."""))
@@ -204,6 +286,8 @@ cells.append(md("""## References & Further Reading
 - `Flight_Delay_Baseline_and_Strategy_Report.pdf`: the fuller strategy report this notebook implements (data caveats, feature ideas, model comparison, validation pitfalls).
 - [**root_mean_squared_error (scikit-learn)**](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.root_mean_squared_error.html): the evaluation metric used here and by the leaderboard.
 - [**Ridge (scikit-learn)**](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Ridge.html): the model behind Baseline 2.
+- [**RandomForestRegressor (scikit-learn)**](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html): the Random Forest model above.
+- [**XGBoost Python API (XGBRegressor)**](https://xgboost.readthedocs.io/en/stable/python/python_api.html#xgboost.XGBRegressor): the XGBoost model above.
 - [**Common pitfalls and recommended practices (scikit-learn)**](https://scikit-learn.org/stable/common_pitfalls.html): general guidance on data leakage, directly relevant to the historical-average features planned for the next iteration."""))
 
 nb = {
