@@ -67,3 +67,5 @@ See `presentation/flight_delay_presentation.pdf` for the full findings, recommen
 
 ## Run notebooks
 Notebooks are numbered in run order: 01_data_cleaning.ipynb must be run first, since it writes data/processed/cleaned_data.csv, which 02_feature_engineering_modeling.ipynb then reads as its starting point.
+
+The repo also contain previous model explorations in 03_advanced_model_explorations.ipynb
